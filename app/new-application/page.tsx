@@ -15,59 +15,73 @@ import { Progress } from "@/components/ui/progress"
 import { ChevronLeft, ChevronRight, FileText, User, Dog, Syringe } from "lucide-react"
 import { sanitizeUSPhone, coerceDate, isWithinYears, parseNumberSafe, isPositiveNumber } from "@/lib/utils"
 
-const dogLicenseSchema = z.object({
-  ownerName: z
-    .string()
-    .min(2, "Owner name must be at least 2 characters")
-    .max(100, "Owner name must be less than 100 characters"),
+const createDogLicenseSchema = () => {
+  const baseSchema = {
+    ownerName: z
+      .string()
+      .min(2, "Owner name must be at least 2 characters")
+      .max(100, "Owner name must be less than 100 characters"),
 
-  ownerAddress: z
-    .string()
-    .min(10, "Please provide a complete address")
-    .max(200, "Address must be less than 200 characters"),
+    ownerAddress: z
+      .string()
+      .min(10, "Please provide a complete address")
+      .max(200, "Address must be less than 200 characters"),
 
-  ownerPhone: z.string().refine((val) => {
-    const result = sanitizeUSPhone(val)
-    return result.ok
-  }, "Please enter a valid US phone number"),
+    ownerPhone: z.string().refine((val) => {
+      const result = sanitizeUSPhone(val)
+      return result.ok
+    }, "Please enter a valid US phone number"),
 
-  dogName: z.string().min(1, "Dog name is required").max(50, "Dog name must be less than 50 characters"),
+    dogName: z.string().min(1, "Dog name is required").max(50, "Dog name must be less than 50 characters"),
 
-  dogBreed: z.string().min(1, "Dog breed is required").max(50, "Dog breed must be less than 50 characters"),
+    dogBreed: z.string().min(1, "Dog breed is required").max(50, "Dog breed must be less than 50 characters"),
 
-  dogAge: z.string().refine((val) => {
-    const num = parseNumberSafe(val)
-    return num !== null && isPositiveNumber(num) && num <= 30
-  }, "Dog age must be a positive number (max 30 years)"),
+    dogAge: z.string().refine((val) => {
+      const num = parseNumberSafe(val)
+      return num !== null && isPositiveNumber(num) && num <= 30
+    }, "Dog age must be a positive number (max 30 years)"),
 
-  dogColor: z.string().min(1, "Dog color is required").max(30, "Dog color must be less than 30 characters"),
+    dogColor: z.string().min(1, "Dog color is required").max(30, "Dog color must be less than 30 characters"),
 
-  lastRabiesShotDate: z
-    .string()
-    .refine((val) => {
-      const date = coerceDate(val)
-      return date !== null
-    }, "Please enter a valid date")
-    .refine((val) => {
-      const date = coerceDate(val)
-      return date && isWithinYears(date, 3)
-    }, "Rabies vaccination must be within the last 3 years"),
+    lastRabiesShotDate: z
+      .string()
+      .refine((val) => {
+        const date = coerceDate(val)
+        return date !== null
+      }, "Please enter a valid date")
+      .refine((val) => {
+        const date = coerceDate(val)
+        return date && isWithinYears(date, 3)
+      }, "Rabies vaccination must be within the last 3 years"),
+  }
 
-  vaccinationCertificate: z
-    .instanceof(FileList)
-    .refine((files) => files.length > 0, "Vaccination certificate is required")
-    .refine((files) => {
-      const file = files[0]
-      return file && file.size <= 5 * 1024 * 1024 // 5MB limit
-    }, "File size must be less than 5MB")
-    .refine((files) => {
-      const file = files[0]
-      const allowedTypes = ["application/pdf", "image/jpeg", "image/png", "image/jpg"]
-      return file && allowedTypes.includes(file.type)
-    }, "File must be PDF, JPEG, or PNG format"),
-})
+  // Only add FileList validation on client side
+  if (typeof window !== "undefined" && typeof FileList !== "undefined") {
+    return z.object({
+      ...baseSchema,
+      vaccinationCertificate: z
+        .instanceof(FileList)
+        .refine((files) => files.length > 0, "Vaccination certificate is required")
+        .refine((files) => {
+          const file = files[0]
+          return file && file.size <= 5 * 1024 * 1024 // 5MB limit
+        }, "File size must be less than 5MB")
+        .refine((files) => {
+          const file = files[0]
+          const allowedTypes = ["application/pdf", "image/jpeg", "image/png", "image/jpg"]
+          return file && allowedTypes.includes(file.type)
+        }, "File must be PDF, JPEG, or PNG format"),
+    })
+  } else {
+    // Server-side fallback - use any() for file field
+    return z.object({
+      ...baseSchema,
+      vaccinationCertificate: z.any().optional(),
+    })
+  }
+}
 
-type DogLicenseFormData = z.infer<typeof dogLicenseSchema>
+type DogLicenseFormData = z.infer<ReturnType<typeof createDogLicenseSchema>>
 
 const STEPS = [
   { id: 1, title: "Owner Information", icon: User, description: "Your personal details" },
@@ -79,10 +93,7 @@ const STEPS = [
 export default function NewApplication() {
   const [currentStep, setCurrentStep] = useState(1)
   const [isClient, setIsClient] = useState(false)
-
-  useEffect(() => {
-    setIsClient(true)
-  }, [])
+  const [dogLicenseSchema, setDogLicenseSchema] = useState(() => createDogLicenseSchema())
 
   const form = useForm<DogLicenseFormData>({
     resolver: zodResolver(dogLicenseSchema),
@@ -98,6 +109,17 @@ export default function NewApplication() {
     },
     mode: "onChange",
   })
+
+  useEffect(() => {
+    setIsClient(true)
+    setDogLicenseSchema(createDogLicenseSchema())
+  }, [])
+
+  useEffect(() => {
+    if (isClient) {
+      form.clearErrors()
+    }
+  }, [isClient])
 
   useEffect(() => {
     if (isClient) {
